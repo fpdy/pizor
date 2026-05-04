@@ -55,13 +55,8 @@ else
   install_file "$TEMPLATE_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.md" 0644
 fi
 
-# Environment example is also conservative to avoid clobbering project files.
-if [ -f "$TARGET_DIR/.env.example" ]; then
-  install_file "$TEMPLATE_DIR/.env.example" "$TARGET_DIR/.env.pi-orchestrator.example" 0644
-  echo "note: existing .env.example kept; see .env.pi-orchestrator.example"
-else
-  install_file "$TEMPLATE_DIR/.env.example" "$TARGET_DIR/.env.example" 0644
-fi
+# Environment example lives under .pi to avoid clobbering project files.
+install_file "$TEMPLATE_DIR/.env.example" "$TARGET_DIR/.pi/.env.example" 0644
 
 # Skills.
 while IFS= read -r -d '' src; do
@@ -71,8 +66,8 @@ done < <(find "$TEMPLATE_DIR/.pi" -type f -print0 | sort -z)
 
 # Scripts.
 while IFS= read -r -d '' src; do
-  rel="${src#$TEMPLATE_DIR/}"
-  install_file "$src" "$TARGET_DIR/$rel" 0755
+  rel="${src#$TEMPLATE_DIR/scripts/}"
+  install_file "$src" "$TARGET_DIR/.pi/scripts/$rel" 0755
 done < <(find "$TEMPLATE_DIR/scripts" -type f -print0 | sort -z)
 
 # Local state should not be committed.
@@ -84,7 +79,11 @@ if ! grep -qxF '# pi-zellij-orchestrator' "$GITIGNORE"; then
 # pi-zellij-orchestrator
 .orchestrator/
 .env
+.pi/.env
 EOF
+  echo "updated: .gitignore"
+elif ! grep -qxF '.pi/.env' "$GITIGNORE"; then
+  printf '%s\n' '.pi/.env' >> "$GITIGNORE"
   echo "updated: .gitignore"
 fi
 
@@ -93,8 +92,8 @@ cat <<EOF
 Done.
 
 Start from inside Zellij:
-  scripts/session-start
+  .pi/scripts/session-start
 
 Inspect registry:
-  scripts/registry-list
+  .pi/scripts/registry-list
 EOF

@@ -36,11 +36,11 @@ Installed files include:
 
 ```text
 AGENTS.md or AGENTS.pi-orchestrator.md
-.env.example or .env.pi-orchestrator.example
+.pi/.env.example
 .pi/skills/node-master/SKILL.md
 .pi/skills/node-observer/SKILL.md
 .pi/skills/node-worker/SKILL.md
-scripts/*
+.pi/scripts/*
 ```
 
 Existing `AGENTS.md` files are never overwritten. If the target repository already has one, the installer writes `AGENTS.pi-orchestrator.md` instead. Merge it manually if needed.
@@ -51,7 +51,7 @@ Open the target repository inside Zellij:
 
 ```bash
 cd /path/to/target-repo
-scripts/session-start
+.pi/scripts/session-start
 ```
 
 This creates:
@@ -64,20 +64,20 @@ Give tasks to the master node. The master creates worker nodes only when needed.
 ## Common commands
 
 ```bash
-scripts/session-start
-scripts/registry-list
-scripts/worker-spawn <task_id> <assignment_id> [purpose] [cwd]
-scripts/worker-dispatch <pane_id> <dispatch-file>
-scripts/worker-kill <pane_id>
-scripts/worker-cleanup
+.pi/scripts/session-start
+.pi/scripts/registry-list
+.pi/scripts/worker-spawn <task_id> <assignment_id> [purpose] [cwd]
+.pi/scripts/worker-dispatch <pane_id> <dispatch-file>
+.pi/scripts/worker-kill <pane_id>
+.pi/scripts/worker-cleanup
 ```
 
 ## Configuration
 
-Usually no `.env` file is required. If needed, copy and edit the example:
+Usually no `.pi/.env` file is required. If needed, copy and edit the example:
 
 ```bash
-cp .env.example .env
+cp .pi/.env.example .pi/.env
 ```
 
 Common settings:

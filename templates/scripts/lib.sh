@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ORCH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PI_ORCH_HOME="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORCH_ROOT="$(cd "$PI_ORCH_HOME/.." && pwd)"
 
-if [ -f "$ORCH_ROOT/.env" ]; then
+if [ -f "$PI_ORCH_HOME/.env" ]; then
   # shellcheck disable=SC1091
-  source "$ORCH_ROOT/.env"
+  source "$PI_ORCH_HOME/.env"
 fi
 
 if [ -z "${PI_ORCH_SESSION:-}" ]; then
