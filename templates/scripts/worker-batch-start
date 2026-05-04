@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+usage() {
+  cat <<'EOF'
+usage: worker-batch-start <task-id> <assignments.json>
+
+assignments.json is an array of objects:
+[
+  {
+    "assignment_id": "A1-impl",
+    "objective": "...",
+    "scope": "src/foo.rs",
+    "stop_condition": "...",
+    "do_not": "...",
+    "purpose": "...",
+    "phase": "implementation|review|test|investigation",
+    "access": "write|read",
+    "depends_on": ["A0"]
+  }
+]
+
+The script refuses batches with conflicting write scopes and respects
+PI_MAX_PARALLEL_WORKERS / PI_MAX_PARALLEL_WRITERS.
+EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+task_id="${1:?task-id required}"
+json_file="${2:?assignments.json required}"
+
+require_base_tools
+[ -f "$json_file" ] || die "assignment file not found: $json_file"
+
+jq -e 'type == "array"' "$json_file" >/dev/null || die "assignments.json must be an array"
+count="$(jq 'length' "$json_file")"
+[ "$count" -gt 0 ] || die "assignment batch is empty"
+[ "$count" -le "$PI_MAX_PARALLEL_WORKERS" ] || die "batch has $count assignments; PI_MAX_PARALLEL_WORKERS=$PI_MAX_PARALLEL_WORKERS"
+
+writer_count="$(jq '[.[] | select((.access // "write") == "write")] | length' "$json_file")"
+[ "$writer_count" -le "$PI_MAX_PARALLEL_WRITERS" ] || die "batch has $writer_count write assignments; PI_MAX_PARALLEL_WRITERS=$PI_MAX_PARALLEL_WRITERS"
+
+# Refuse duplicate write scopes. Read-only review/investigation/test workers may
+# share a scope with a writer as long as they do not modify files.
+duplicate_write_scope="$(jq -r '[.[] | select((.access // "write") == "write") | (.scope // "")] | group_by(.)[] | select(length > 1 and .[0] != "") | .[0]' "$json_file" | head -n 1)"
+[ -z "$duplicate_write_scope" ] || die "multiple write assignments use the same scope: $duplicate_write_scope"
+
+init_registry
+
+is_dependency_done() {
+  local dep="$1"
+  awk -F '\t' -v dep="$dep" 'NR > 1 && $4 == dep && ($5 == "done" || $5 == "closed") { found=1 } END { exit found ? 0 : 1 }' "$REGISTRY_FILE"
+}
+
+spawned=()
+for i in $(seq 0 $((count - 1))); do
+  assignment_id="$(jq -r ".[$i].assignment_id" "$json_file")"
+  objective="$(jq -r ".[$i].objective" "$json_file")"
+  scope="$(jq -r ".[$i].scope // \"Stay within this assignment. Do not broaden scope.\"" "$json_file")"
+  stop_condition="$(jq -r ".[$i].stop_condition // \"Stop when you can produce the required report, or when you become blocked.\"" "$json_file")"
+  do_not="$(jq -r ".[$i].do_not // \"Do not commit. Do not modify unrelated files. Do not perform destructive actions.\"" "$json_file")"
+  purpose="$(jq -r ".[$i].purpose // .[$i].objective" "$json_file")"
+  phase="$(jq -r ".[$i].phase // \"assignment\"" "$json_file")"
+  depends_on="$(jq -r ".[$i].depends_on // [] | join(\",\")" "$json_file")"
+
+  if [ -n "$depends_on" ]; then
+    IFS=',' read -r -a deps <<< "$depends_on"
+    for dep in "${deps[@]}"; do
+      [ -n "$dep" ] || continue
+      if ! is_dependency_done "$dep"; then
+        echo "skip: $assignment_id waits for dependency $dep" >&2
+        continue 2
+      fi
+    done
+  fi
+
+  pane_id="$($SCRIPT_DIR/worker-spawn "$task_id" "$assignment_id" "$purpose" "$PI_WORKDIR" "$phase" "$scope" "$depends_on")"
+  spawned+=("$pane_id:$assignment_id")
+done
+
+sleep "$PI_WORKER_BOOT_WAIT"
+
+for entry in "${spawned[@]}"; do
+  pane_id="${entry%%:*}"
+  assignment_id="${entry#*:}"
+  idx="$(jq -r --arg id "$assignment_id" 'map(.assignment_id == $id) | index(true)' "$json_file")"
+  objective="$(jq -r ".[$idx].objective" "$json_file")"
+  scope="$(jq -r ".[$idx].scope // \"Stay within this assignment. Do not broaden scope.\"" "$json_file")"
+  stop_condition="$(jq -r ".[$idx].stop_condition // \"Stop when you can produce the required report, or when you become blocked.\"" "$json_file")"
+  do_not="$(jq -r ".[$idx].do_not // \"Do not commit. Do not modify unrelated files. Do not perform destructive actions.\"" "$json_file")"
+  "$SCRIPT_DIR/worker-dispatch" "$pane_id" "$task_id" "$assignment_id" "$objective" "$scope" "$stop_condition" "$do_not"
+  printf '%s\t%s\n' "$pane_id" "$assignment_id"
+done

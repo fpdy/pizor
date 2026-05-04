@@ -24,6 +24,12 @@ fi
 : "${PI_ORCH_STATE_DIR:=.orchestrator}"
 : "${PI_WORKER_BOOT_WAIT:=1}"
 : "${PI_WORKER_NAME_PREFIX:=worker}"
+: "${PI_OBSERVER_POLL_INTERVAL:=5}"
+: "${PI_WORKER_IDLE_WARN_SECONDS:=120}"
+: "${PI_WORKER_LONG_RUNNING_SECONDS:=300}"
+: "${PI_OBSERVER_NOTICE_COOLDOWN_SECONDS:=60}"
+: "${PI_MAX_PARALLEL_WORKERS:=4}"
+: "${PI_MAX_PARALLEL_WRITERS:=1}"
 
 ORCH_STATE_DIR="$ORCH_ROOT/$PI_ORCH_STATE_DIR"
 REGISTRY_FILE="$ORCH_STATE_DIR/registry.tsv"
@@ -58,9 +64,27 @@ now_iso() {
   date -Iseconds
 }
 
+registry_header() {
+  printf 'role\tpane_id\ttask_id\tassignment_id\tstatus\tpurpose\tphase\tscope\tdepends_on\tspawned_at\tlast_seen_at\treport_captured\tcleanup_required\tupdated_at\n'
+}
+
 init_registry() {
   if [ ! -f "$REGISTRY_FILE" ]; then
-    printf 'role\tpane_id\ttask_id\tassignment_id\tstatus\tpurpose\tupdated_at\n' > "$REGISTRY_FILE"
+    registry_header > "$REGISTRY_FILE"
+  fi
+
+  # Migrate the original 7-column registry in-place. Keep this lightweight so
+  # upgraded installations do not lose active pane state.
+  local first_line
+  first_line="$(head -n 1 "$REGISTRY_FILE")"
+  if [ "$first_line" = $'role\tpane_id\ttask_id\tassignment_id\tstatus\tpurpose\tupdated_at' ]; then
+    local tmp="$REGISTRY_FILE.tmp"
+    registry_header > "$tmp"
+    awk -F '\t' -v OFS='\t' 'NR > 1 {
+      updated_at=$7
+      print $1,$2,$3,$4,$5,$6,"","","",updated_at,updated_at,"no","no",updated_at
+    }' "$REGISTRY_FILE" >> "$tmp"
+    mv "$tmp" "$REGISTRY_FILE"
   fi
 }
 
@@ -71,26 +95,69 @@ registry_add() {
   local assignment_id="${4:-}"
   local status="${5:-unknown}"
   local purpose="${6:-}"
+  local phase="${7:-}"
+  local scope="${8:-}"
+  local depends_on="${9:-}"
+  local ts
+  ts="$(now_iso)"
 
   init_registry
 
   awk -F '\t' -v OFS='\t' -v pane="$pane_id" 'NR==1 || $2 != pane { print }' "$REGISTRY_FILE" > "$REGISTRY_FILE.tmp"
   mv "$REGISTRY_FILE.tmp" "$REGISTRY_FILE"
 
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$role" "$pane_id" "$task_id" "$assignment_id" "$status" "$purpose" "$(now_iso)" \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$role" "$pane_id" "$task_id" "$assignment_id" "$status" "$purpose" \
+    "$phase" "$scope" "$depends_on" "$ts" "$ts" "no" "no" "$ts" \
     >> "$REGISTRY_FILE"
 }
 
 registry_update_status() {
   local pane_id="$1"
   local status="$2"
+  local ts
+  ts="$(now_iso)"
 
   init_registry
 
-  awk -F '\t' -v OFS='\t' -v pane="$pane_id" -v status="$status" -v ts="$(now_iso)" '
+  awk -F '\t' -v OFS='\t' -v pane="$pane_id" -v status="$status" -v ts="$ts" '
     NR == 1 { print; next }
-    $2 == pane { $5 = status; $7 = ts }
+    $2 == pane { $5 = status; $11 = ts; $14 = ts }
+    { print }
+  ' "$REGISTRY_FILE" > "$REGISTRY_FILE.tmp"
+
+  mv "$REGISTRY_FILE.tmp" "$REGISTRY_FILE"
+}
+
+registry_update_worker_report() {
+  local pane_id="$1"
+  local status="$2"
+  local cleanup_required="${3:-yes}"
+  local report_captured="${4:-no}"
+  local ts
+  ts="$(now_iso)"
+
+  init_registry
+
+  awk -F '\t' -v OFS='\t' -v pane="$pane_id" -v status="$status" -v cleanup="$cleanup_required" -v captured="$report_captured" -v ts="$ts" '
+    NR == 1 { print; next }
+    $2 == pane { $5 = status; $11 = ts; $12 = captured; $13 = cleanup; $14 = ts }
+    { print }
+  ' "$REGISTRY_FILE" > "$REGISTRY_FILE.tmp"
+
+  mv "$REGISTRY_FILE.tmp" "$REGISTRY_FILE"
+}
+
+registry_mark_report_captured() {
+  local pane_id="$1"
+  local ts
+  ts="$(now_iso)"
+
+  init_registry
+
+  awk -F '\t' -v OFS='\t' -v pane="$pane_id" -v ts="$ts" '
+    NR == 1 { print; next }
+    $2 == pane { $12 = "yes"; $13 = "no"; $14 = ts }
     { print }
   ' "$REGISTRY_FILE" > "$REGISTRY_FILE.tmp"
 

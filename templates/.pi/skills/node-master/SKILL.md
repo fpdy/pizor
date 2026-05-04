@@ -46,15 +46,17 @@ For every substantial user task:
 3. Create a planning checkpoint in `/tree`.
 4. Decide the minimal set of concrete assignments.
 5. Create a dispatch batch.
-6. Spawn only the workers needed for that batch.
-7. Dispatch exactly one assignment to each worker.
-8. Track worker_pane_id, task_id, assignment_id, status, and purpose.
-9. Collect structured worker reports.
-10. Capture each report in its own report branch.
-11. Summarize each report branch with custom focus instructions.
-12. Kill completed, failed, blocked, cancelled, or superseded workers after report capture.
-13. Synthesize only from carry-forward context.
-14. Spawn a second batch only if synthesis proves more information is required.
+6. Classify each assignment as implementation, investigation, review, or verification.
+7. Spawn all non-conflicting workers needed for the current batch; prefer useful parallelism over sequential polling.
+8. Dispatch exactly one assignment to each worker.
+9. Track worker_pane_id, task_id, assignment_id, status, purpose, phase, scope, and dependencies.
+10. Collect structured worker reports.
+11. Capture each report in its own report branch.
+12. Summarize each report branch with custom focus instructions.
+13. Kill completed, failed, blocked, cancelled, or superseded workers after report capture.
+14. Synthesize only from carry-forward context.
+15. Spawn review and verification workers before final decision unless explicitly impossible.
+16. Spawn a second batch only if synthesis proves more information is required.
 
 ## No Idle Worker Policy
 
@@ -84,7 +86,9 @@ If there is no concrete assignment, do not spawn a worker.
 
 A dispatch batch is a bounded group of assignments created from the current planning branch.
 
-A batch should be as small as possible.
+A batch should be as small as possible while still using safe parallelism. If an implementation worker is active, consider whether a read-only investigation, review, or verification worker can run concurrently without touching the same files.
+
+Use `.pi/scripts/worker-batch-start <task-id> <assignments.json>` when dispatching multiple non-conflicting assignments.
 
 Use a new batch when:
 
@@ -94,6 +98,14 @@ Use a new batch when:
 - implementation needs a follow-up check
 
 Do not spawn a new batch while unresolved reports from the current batch are still missing unless the user explicitly asks.
+
+Parallel safety rules:
+
+- Multiple read-only workers may inspect the same scope.
+- At most one write-capable implementation worker should modify a given scope.
+- Verification and review workers are read-only unless explicitly assigned a fix.
+- Use dependencies for assignments that require prior implementation results.
+- Ask the observer to warn about underutilization, duplicate scope, and cleanup delays.
 
 ## Assignment Design
 
@@ -107,6 +119,8 @@ Good assignments:
 - propose a minimal patch without editing
 - review a specific diff
 - verify one hypothesis
+- run a specific test/check/lint command read-only
+- review a completed worker diff while another worker continues a non-conflicting task
 
 Bad assignments:
 
@@ -154,6 +168,14 @@ Required report:
 Before starting, create or identify a /tree checkpoint.
 After finishing, report to pane_id=1 and pane_id=0, then wait for cleanup.
 [/MASTER_DISPATCH]
+
+## Master Work Prohibitions
+
+The master MUST NOT become the polling loop for the session. Do not repeatedly sleep and pane-dump workers from the user/main thread. Rely on the observer and `observer-loop` for lifecycle monitoring.
+
+The master MUST NOT run final verification commands directly when a worker can be spawned. Commands such as `cargo test`, `cargo clippy`, `cargo fmt --check`, `npm test`, `pytest`, or project-specific checks should be assigned to a verification worker.
+
+The master MUST NOT skip review for substantial implementation changes. Spawn a read-only review worker before final synthesis unless the user explicitly opts out or the task is trivial.
 
 ## Worker Report Handling
 

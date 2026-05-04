@@ -40,6 +40,7 @@ AGENTS.md or AGENTS.pi-orchestrator.md
 .pi/skills/node-master/SKILL.md
 .pi/skills/node-observer/SKILL.md
 .pi/skills/node-worker/SKILL.md
+.pi/assignments/*.md
 .pi/scripts/*
 ```
 
@@ -54,6 +55,14 @@ cd /path/to/target-repo
 .pi/scripts/session-start
 ```
 
+For autonomous lifecycle monitoring, start with:
+
+```bash
+.pi/scripts/session-start --auto-observe
+```
+
+`--auto-observe` asks the observer pane to run `observer-loop`, which polls the registry/panes, detects worker reports, warns about idle or long-running workers, and warns when the master starts doing verification work directly.
+
 This creates:
 
 - observer node
@@ -61,13 +70,19 @@ This creates:
 
 Give tasks to the master node. The master creates worker nodes only when needed. Each worker receives one bounded assignment, reports back, and is expected to be cleaned up afterward.
 
+For substantial tasks, the master should dispatch safe parallel batches instead of running one worker at a time. For example, an implementation worker can run while read-only investigation/review workers inspect non-conflicting scope. Final tests/checks should be delegated to a verification worker rather than run directly by the master.
+
 ## Common commands
 
 ```bash
-.pi/scripts/session-start
+.pi/scripts/session-start [--auto-observe]
 .pi/scripts/registry-list
-.pi/scripts/worker-spawn <task_id> <assignment_id> [purpose] [cwd]
-.pi/scripts/worker-dispatch <pane_id> <dispatch-file>
+.pi/scripts/observer-loop [--once] [--interval seconds]
+.pi/scripts/registry-update status <pane-id> <status>
+.pi/scripts/registry-update report <pane-id> <status> [cleanup-required] [report-captured]
+.pi/scripts/worker-spawn <task_id> <assignment_id> [purpose] [cwd] [phase] [scope] [depends-on]
+.pi/scripts/worker-dispatch <pane_id> <task_id> <assignment_id> <objective> [scope] [stop-condition] [do-not]
+.pi/scripts/worker-batch-start <task_id> <assignments.json>
 .pi/scripts/worker-kill <pane_id>
 .pi/scripts/worker-cleanup
 ```
@@ -88,6 +103,12 @@ PI_WORKDIR="$PWD"
 PI_ORCH_STATE_DIR=".orchestrator"
 PI_WORKER_BOOT_WAIT=1
 PI_WORKER_NAME_PREFIX=worker
+PI_OBSERVER_POLL_INTERVAL=5
+PI_WORKER_IDLE_WARN_SECONDS=120
+PI_WORKER_LONG_RUNNING_SECONDS=300
+PI_OBSERVER_NOTICE_COOLDOWN_SECONDS=60
+PI_MAX_PARALLEL_WORKERS=4
+PI_MAX_PARALLEL_WRITERS=1
 ```
 
 If `PI_ORCH_SESSION` is unset, scripts read it from Zellij's `$ZELLIJ_SESSION_NAME`.
@@ -102,6 +123,44 @@ The installer adds the following to `.gitignore`:
 ```
 
 `.orchestrator/` stores local pane registry state and should not be committed.
+
+## Parallel batch example
+
+Create an assignment file:
+
+```json
+[
+  {
+    "assignment_id": "A1-impl",
+    "objective": "Implement the bounded change in src/foo.rs.",
+    "scope": "src/foo.rs",
+    "phase": "implementation",
+    "access": "write"
+  },
+  {
+    "assignment_id": "A2-review",
+    "objective": "Review the previous phase and inspect adjacent risk areas without editing.",
+    "scope": "src/foo.rs src/foo_tests.rs",
+    "phase": "review",
+    "access": "read"
+  },
+  {
+    "assignment_id": "A3-verify",
+    "objective": "Run the focused test command and report results without editing.",
+    "scope": "cargo test foo",
+    "phase": "verification",
+    "access": "read"
+  }
+]
+```
+
+Then dispatch the non-conflicting batch:
+
+```bash
+.pi/scripts/worker-batch-start task-123 assignments.json
+```
+
+The script enforces `PI_MAX_PARALLEL_WORKERS`, `PI_MAX_PARALLEL_WRITERS`, and duplicate write-scope checks.
 
 ## Updating
 
@@ -123,5 +182,6 @@ templates/
   AGENTS.md
   .env.example
   .pi/skills/
+  assignments/
   scripts/
 ```

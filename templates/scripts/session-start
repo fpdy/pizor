@@ -7,6 +7,23 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_base_tools
 
+auto_observe="false"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --auto-observe) auto_observe="true"; shift ;;
+    -h|--help)
+      cat <<'EOF'
+usage: session-start [--auto-observe]
+
+--auto-observe starts the observer-loop from the observer Pi pane so the user
+thread does not have to poll pane-dump/registry-list manually.
+EOF
+      exit 0
+      ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
 if [ -z "${ZELLIJ:-}" ] && [ -z "${ZELLIJ_SESSION_NAME:-}" ]; then
   die "session-start must be run from inside Zellij"
 fi
@@ -36,7 +53,8 @@ sleep "$PI_WORKER_BOOT_WAIT"
 
 You are the observer node for this Zellij Pi orchestration session.
 Track dynamic worker lifecycle.
-Do not assume fixed workers."
+Do not assume fixed workers.
+If auto-observe is requested, run .pi/scripts/observer-loop and relay its findings to the master."
 
 "$SCRIPT_DIR/pane-send" "$master_pane" "/skill:node-master
 
@@ -50,10 +68,15 @@ Use /tree for planning, worker reports, synthesis, and final decisions."
 registry_update_status "$observer_pane" "running"
 registry_update_status "$master_pane" "running"
 
+if [ "$auto_observe" = "true" ]; then
+  "$SCRIPT_DIR/pane-send" "$observer_pane" "! .pi/scripts/observer-loop --interval $PI_OBSERVER_POLL_INTERVAL"
+fi
+
 cat <<EOF
 session: $PI_ORCH_SESSION
 observer_pane: $observer_pane
 master_pane: $master_pane
+auto_observe: $auto_observe
 
 Attach:
   zellij attach $PI_ORCH_SESSION

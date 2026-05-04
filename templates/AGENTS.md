@@ -7,7 +7,7 @@ This file is the shared policy for every Pi instance in this repo
 
 There are three logical node roles:
 
-- observer node: monitors lifecycle, drift, progress, cleanup
+- observer node: monitors lifecycle, drift, progress, cleanup, and keeps polling out of the user/main thread
 - master node: decomposes tasks, spawns workers, kills workers, manages global context
 - worker node: executes exactly one bounded assignment and reports back
 
@@ -36,6 +36,8 @@ DO NOT create standing workers such as:
 - review worker
 
 Spawn a worker only when there is a concrete bounded assignment
+
+Prefer safe parallel batches over unnecessary sequential execution. Implementation, read-only investigation, read-only review, and verification assignments may run at the same time when their scopes do not conflict.
 
 A concrete assignment must include:
 
@@ -124,6 +126,7 @@ Workers must explicitly report reusable facts.
 
 The observer monitors dynamic worker lifecycle
 The observer does not assume fixed workers
+The observer SHOULD run `.pi/scripts/observer-loop` or an equivalent loop so the user/main thread does not repeatedly sleep and dump panes
 
 The observer tracks:
 
@@ -145,6 +148,8 @@ The observer SHOULD warn the master when:
 - reports are missing required fields
 - synthesis is accumulating raw logs
 - the master should switch to `/tree`
+- only one worker is active despite obvious non-conflicting review, investigation, or verification work
+- the master runs tests, lint, review, or final verification directly instead of delegating to a worker
 
 ## Structured Message Policy
 
@@ -205,4 +210,13 @@ DO NOT commit changes unless the assignment explicitly asks for commits
 DO NOT modify unrelated files
 DO NOT broaden the task without asking the master
 DO NOT coordinate with other workers unless instructed by the master
+
+## Verification and Review Policy
+
+For substantial changes, review and verification are worker assignments, not master chores.
+
+- The master SHOULD spawn a read-only review worker before final synthesis.
+- The master SHOULD spawn a verification worker for project checks such as tests, lint, and formatting.
+- The master SHOULD NOT run final verification commands directly unless no worker can be spawned.
+- The observer SHOULD warn if final synthesis begins without review or verification reports.
 

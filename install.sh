@@ -70,6 +70,14 @@ while IFS= read -r -d '' src; do
   install_file "$src" "$TARGET_DIR/.pi/scripts/$rel" 0755
 done < <(find "$TEMPLATE_DIR/scripts" -type f -print0 | sort -z)
 
+# Assignment templates.
+if [ -d "$TEMPLATE_DIR/assignments" ]; then
+  while IFS= read -r -d '' src; do
+    rel="${src#$TEMPLATE_DIR/assignments/}"
+    install_file "$src" "$TARGET_DIR/.pi/assignments/$rel" 0644
+  done < <(find "$TEMPLATE_DIR/assignments" -type f -print0 | sort -z)
+fi
+
 # Local state should not be committed.
 GITIGNORE="$TARGET_DIR/.gitignore"
 touch "$GITIGNORE"
