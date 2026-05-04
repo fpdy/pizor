@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+require_base_tools
+
+pane_id="${1:?usage: worker-kill <pane-id>}"
+
+registry_update_status "$pane_id" "closing" || true
+
+zellij --session "$PI_ORCH_SESSION" action close-pane --pane-id "$pane_id"
+
+registry_update_status "$pane_id" "closed" || true

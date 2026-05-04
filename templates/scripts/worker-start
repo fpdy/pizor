@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+task_id="${1:?usage: worker-start <task-id> <assignment-id> <objective> [scope] [stop-condition] [do-not]}"
+assignment_id="${2:?usage: worker-start <task-id> <assignment-id> <objective> [scope] [stop-condition] [do-not]}"
+objective="${3:?usage: worker-start <task-id> <assignment-id> <objective> [scope] [stop-condition] [do-not]}"
+scope="${4:-Stay within this assignment. Do not broaden scope.}"
+stop_condition="${5:-Stop when you can produce the required report, or when you become blocked.}"
+do_not="${6:-Do not commit. Do not modify unrelated files. Do not perform destructive actions.}"
+
+pane_id="$("$SCRIPT_DIR/worker-spawn" "$task_id" "$assignment_id" "$objective")"
+
+sleep "$PI_WORKER_BOOT_WAIT"
+
+"$SCRIPT_DIR/worker-dispatch" \
+  "$pane_id" \
+  "$task_id" \
+  "$assignment_id" \
+  "$objective" \
+  "$scope" \
+  "$stop_condition" \
+  "$do_not"
+
+printf '%s\n' "$pane_id"

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+message="${1:?usage: worker-broadcast <message>}"
+
+init_registry
+
+awk -F '\t' 'NR > 1 && $1 == "worker" && $5 != "closed" { print $2 }' "$REGISTRY_FILE" |
+while IFS= read -r pane_id; do
+  [ -n "$pane_id" ] || continue
+  "$SCRIPT_DIR/pane-send" "$pane_id" "$message"
+done

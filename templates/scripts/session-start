@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+require_base_tools
+
+if [ -z "${ZELLIJ:-}" ] && [ -z "${ZELLIJ_SESSION_NAME:-}" ]; then
+  die "session-start must be run from inside Zellij"
+fi
+
+observer_pane="$(
+  zellij --session "$PI_ORCH_SESSION" action new-pane \
+    --cwd "$PI_WORKDIR" \
+    --name "observer" \
+    -- "$PI_CMD"
+)"
+
+master_pane="$(
+  zellij --session "$PI_ORCH_SESSION" action new-pane \
+    --cwd "$PI_WORKDIR" \
+    --name "master" \
+    -- "$PI_CMD"
+)"
+
+registry_add "observer" "$observer_pane" "" "" "starting" "observer node"
+registry_add "master" "$master_pane" "" "" "starting" "master node"
+
+sleep "$PI_WORKER_BOOT_WAIT"
+
+"$SCRIPT_DIR/pane-send" "$observer_pane" "/skill:node-observer
+
+/name pi-orchestrator-observer
+
+You are the observer node for this Zellij Pi orchestration session.
+Track dynamic worker lifecycle.
+Do not assume fixed workers."
+
+"$SCRIPT_DIR/pane-send" "$master_pane" "/skill:node-master
+
+/name pi-orchestrator-master
+
+You are the master node for this Zellij Pi orchestration session.
+Use dynamic workers only.
+Do not keep idle workers.
+Use /tree for planning, worker reports, synthesis, and final decisions."
+
+registry_update_status "$observer_pane" "running"
+registry_update_status "$master_pane" "running"
+
+cat <<EOF
+session: $PI_ORCH_SESSION
+observer_pane: $observer_pane
+master_pane: $master_pane
+
+Attach:
+  zellij attach $PI_ORCH_SESSION
+
+Registry:
+  scripts/registry-list
+EOF

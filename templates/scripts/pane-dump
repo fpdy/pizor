@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+require_base_tools
+
+pane_id="${1:?usage: pane-dump <pane-id>}"
+
+zellij --session "$PI_ORCH_SESSION" action dump-screen --pane-id "$pane_id" --full

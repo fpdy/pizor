@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: worker-cleanup <pane-id> [pane-id ...]" >&2
+  exit 1
+fi
+
+for pane_id in "$@"; do
+  "$SCRIPT_DIR/worker-kill" "$pane_id"
+done

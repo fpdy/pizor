@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+init_registry
+
+# Fill empty TSV fields with '-' before rendering. This keeps columns aligned
+# for observer/master rows where task_id and assignment_id are intentionally empty.
+rendered="$REGISTRY_FILE.rendered.$$"
+awk -F '\t' -v OFS='\t' '{
+  for (i = 1; i <= NF; i++) {
+    if ($i == "") $i = "-"
+  }
+  print
+}' "$REGISTRY_FILE" > "$rendered"
+
+trap 'rm -f "$rendered"' EXIT
+
+if command -v column >/dev/null 2>&1; then
+  column -t -s $'\t' "$rendered"
+else
+  cat "$rendered"
+fi

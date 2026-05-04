@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+require_cmd zellij
+
+pane_id="${1:?usage: pane-send <pane-id> <message>}"
+message="${2:?usage: pane-send <pane-id> <message>}"
+
+# Prefer Zellij's built-in terminal input actions over the external
+# zellij-send-keys plugin. This avoids plugin compatibility/runtime issues and
+# works with both numeric pane IDs and terminal_<id> pane IDs.
+zellij --session "$PI_ORCH_SESSION" action write-chars \
+  --pane-id "$pane_id" \
+  "$message"
+
+# Press Enter after writing the message.
+zellij --session "$PI_ORCH_SESSION" action write \
+  --pane-id "$pane_id" \
+  13

@@ -1,0 +1,6 @@
+# local orchestration state
+.orchestrator/
+.env
+
+# macOS
+.DS_Store

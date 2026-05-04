@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+worker_pane="${1:?usage: worker-dispatch <worker-pane-id> <task-id> <assignment-id> <objective> [scope] [stop-condition] [do-not]}"
+task_id="${2:?usage: worker-dispatch <worker-pane-id> <task-id> <assignment-id> <objective> [scope] [stop-condition] [do-not]}"
+assignment_id="${3:?usage: worker-dispatch <worker-pane-id> <task-id> <assignment-id> <objective> [scope] [stop-condition] [do-not]}"
+objective="${4:?usage: worker-dispatch <worker-pane-id> <task-id> <assignment-id> <objective> [scope] [stop-condition] [do-not]}"
+scope="${5:-Stay within this assignment. Do not broaden scope.}"
+stop_condition="${6:-Stop when you can produce the required report, or when you become blocked.}"
+do_not="${7:-Do not commit. Do not modify unrelated files. Do not perform destructive actions.}"
+
+msg=$(cat <<EOF
+/skill:node-worker
+
+[MASTER_DISPATCH]
+from_pane: 1
+to_pane: ${worker_pane}
+role: worker
+message_type: assignment
+task_id: ${task_id}
+assignment_id: ${assignment_id}
+status: assigned
+
+Objective:
+${objective}
+
+Scope:
+${scope}
+
+Stop condition:
+${stop_condition}
+
+Do not:
+${do_not}
+
+Required report:
+- summary
+- files inspected
+- files modified
+- commands run
+- findings
+- blockers
+- recommendation
+- context_to_carry_forward
+- context_to_discard
+
+Before starting, create or identify a /tree checkpoint.
+After finishing, report to pane_id=1 and pane_id=0, then wait for cleanup.
+[/MASTER_DISPATCH]
+EOF
+)
+
+"$SCRIPT_DIR/pane-send" "$worker_pane" "$msg"
+registry_update_status "$worker_pane" "assigned"
