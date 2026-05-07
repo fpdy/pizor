@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 usage: install.sh [target-repo]
 
-Installs Pi Zellij Orchestrator templates into a target repository.
+Installs Pizor templates into a target repository.
 If target-repo is omitted, the current directory is used.
 EOF
 }
@@ -16,13 +16,13 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE_DIR="${PI_ZELLIJ_ORCH_TEMPLATE_DIR:-$SCRIPT_DIR/templates}"
+TEMPLATE_DIR="${PI_PIZOR_TEMPLATE_DIR:-$SCRIPT_DIR/templates}"
 TARGET_DIR="$(cd "${1:-$PWD}" && pwd)"
 STAMP="$(date +%Y%m%d%H%M%S)"
 
 if [ ! -d "$TEMPLATE_DIR" ]; then
   echo "error: templates directory not found: $TEMPLATE_DIR" >&2
-  echo "Run this installer from a cloned pi-zellij-orchestrator repository." >&2
+  echo "Run this installer from a cloned pizor repository." >&2
   exit 1
 fi
 
@@ -49,8 +49,8 @@ install_file() {
 
 # AGENTS.md is special: never overwrite a repository's existing instruction file.
 if [ -f "$TARGET_DIR/AGENTS.md" ]; then
-  install_file "$TEMPLATE_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.pi-orchestrator.md" 0644
-  echo "note: existing AGENTS.md kept; merge AGENTS.pi-orchestrator.md manually if needed"
+  install_file "$TEMPLATE_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.pizor.md" 0644
+  echo "note: existing AGENTS.md kept; merge AGENTS.pizor.md manually if needed"
 else
   install_file "$TEMPLATE_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.md" 0644
 fi
@@ -81,18 +81,26 @@ fi
 # Local state should not be committed.
 GITIGNORE="$TARGET_DIR/.gitignore"
 touch "$GITIGNORE"
-if ! grep -qxF '# pi-zellij-orchestrator' "$GITIGNORE"; then
+if ! grep -qxF '# pizor' "$GITIGNORE"; then
   cat >> "$GITIGNORE" <<'EOF'
 
-# pi-zellij-orchestrator
-.orchestrator/
+# pizor
+.pizor/
 .env
 .pi/.env
 EOF
   echo "updated: .gitignore"
-elif ! grep -qxF '.pi/.env' "$GITIGNORE"; then
-  printf '%s\n' '.pi/.env' >> "$GITIGNORE"
-  echo "updated: .gitignore"
+else
+  updated_gitignore=false
+  for pattern in '.pizor/' '.env' '.pi/.env'; do
+    if ! grep -qxF "$pattern" "$GITIGNORE"; then
+      printf '%s\n' "$pattern" >> "$GITIGNORE"
+      updated_gitignore=true
+    fi
+  done
+  if [ "$updated_gitignore" = "true" ]; then
+    echo "updated: .gitignore"
+  fi
 fi
 
 cat <<EOF
@@ -101,6 +109,9 @@ Done.
 
 Start from inside Zellij:
   .pi/scripts/session-start
+
+Or reload Pi extensions and use:
+  /pizor-start
 
 Inspect registry:
   .pi/scripts/registry-list

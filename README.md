@@ -1,4 +1,4 @@
-# Pi Zellij Orchestrator
+# Pizor
 
 A distributable multi-agent orchestration template for running Pi across Zellij panes as an **observer**, **master**, and ephemeral **workers**.
 
@@ -23,28 +23,29 @@ This system is designed to be run **from inside Zellij**. `PI_ORCH_SESSION` usua
 From the repository where you want to use the orchestrator, run the installer from a cloned copy of this repository:
 
 ```bash
-/path/to/pi-zellij-orchestrator/install.sh
+/path/to/pizor/install.sh
 ```
 
 Or install into an explicit target repository:
 
 ```bash
-/path/to/pi-zellij-orchestrator/install.sh /path/to/target-repo
+/path/to/pizor/install.sh /path/to/target-repo
 ```
 
 Installed files include:
 
 ```text
-AGENTS.md or AGENTS.pi-orchestrator.md
+AGENTS.md or AGENTS.pizor.md
 .pi/.env.example
 .pi/skills/node-master/SKILL.md
 .pi/skills/node-observer/SKILL.md
 .pi/skills/node-worker/SKILL.md
+.pi/extensions/pizor/index.ts
 .pi/assignments/*.md
 .pi/scripts/*
 ```
 
-Existing `AGENTS.md` files are never overwritten. If the target repository already has one, the installer writes `AGENTS.pi-orchestrator.md` instead. Merge it manually if needed.
+Existing `AGENTS.md` files are never overwritten. If the target repository already has one, the installer writes `AGENTS.pizor.md` instead. Merge it manually if needed.
 
 ## Start
 
@@ -55,13 +56,16 @@ cd /path/to/target-repo
 .pi/scripts/session-start
 ```
 
-For autonomous lifecycle monitoring, start with:
 
-```bash
-.pi/scripts/session-start --auto-observe
+After installing or updating the project-local Pi extension, run `/reload` or restart Pi. You can then start the orchestrator from Pi with:
+
+```text
+/pizor-start
 ```
 
-`--auto-observe` asks the observer pane to run `observer-loop`, which polls the registry/panes, detects worker reports, warns about idle or long-running workers, and warns when the master starts doing verification work directly.
+`/pizor-start` and `session-start` create a dedicated Zellij tab for the observer/master pair.
+
+Polling-based observer loops are forbidden. Workers submit sidecar reports with `worker-report-submit`; that script updates the registry and sends `WORKER_REPORT_POINTER` messages to the current master and observer panes.
 
 This creates:
 
@@ -74,14 +78,22 @@ For substantial tasks, the master should dispatch safe parallel batches instead 
 
 ## Common commands
 
+Pi slash command:
+
+```text
+/pizor-start
+```
+
+Shell scripts:
+
 ```bash
-.pi/scripts/session-start [--auto-observe]
+.pi/scripts/session-start
 .pi/scripts/registry-list
-.pi/scripts/observer-loop [--once] [--interval seconds]
 .pi/scripts/registry-update status <pane-id> <status>
 .pi/scripts/registry-update report <pane-id> <status> [cleanup-required] [report-captured]
 .pi/scripts/worker-spawn <task_id> <assignment_id> [purpose] [cwd] [phase] [scope] [depends-on]
 .pi/scripts/worker-dispatch <pane_id> <task_id> <assignment_id> <objective> [scope] [stop-condition] [do-not]
+.pi/scripts/worker-report-submit <worker-pane> <task-id> <assignment-id> <status> <report-file>
 .pi/scripts/worker-batch-start <task_id> <assignments.json>
 .pi/scripts/worker-kill <pane_id>
 .pi/scripts/worker-cleanup
@@ -100,13 +112,8 @@ Common settings:
 ```bash
 PI_CMD=pi
 PI_WORKDIR="$PWD"
-PI_ORCH_STATE_DIR=".orchestrator"
-PI_WORKER_BOOT_WAIT=1
+PI_ORCH_STATE_DIR=".pizor"
 PI_WORKER_NAME_PREFIX=worker
-PI_OBSERVER_POLL_INTERVAL=5
-PI_WORKER_IDLE_WARN_SECONDS=120
-PI_WORKER_LONG_RUNNING_SECONDS=300
-PI_OBSERVER_NOTICE_COOLDOWN_SECONDS=60
 PI_MAX_PARALLEL_WORKERS=4
 PI_MAX_PARALLEL_WRITERS=1
 ```
@@ -118,11 +125,12 @@ If `PI_ORCH_SESSION` is unset, scripts read it from Zellij's `$ZELLIJ_SESSION_NA
 The installer adds the following to `.gitignore`:
 
 ```gitignore
-.orchestrator/
+.pizor/
 .env
+.pi/.env
 ```
 
-`.orchestrator/` stores local pane registry state and should not be committed.
+`.pizor/` stores local pane registry state and should not be committed.
 
 ## Parallel batch example
 
@@ -167,7 +175,7 @@ The script enforces `PI_MAX_PARALLEL_WORKERS`, `PI_MAX_PARALLEL_WRITERS`, and du
 After updating this repository, run the installer again in the target repository:
 
 ```bash
-/path/to/pi-zellij-orchestrator/install.sh /path/to/target-repo
+/path/to/pizor/install.sh /path/to/target-repo
 ```
 
 If an existing installed file differs, the installer creates a `.bak.<timestamp>` backup before replacing it. `AGENTS.md` is still not overwritten directly.

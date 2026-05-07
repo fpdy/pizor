@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+usage() {
+  cat <<'EOF'
+usage: task-handoff <task-id> [objective]
+
+Hands a user/main-thread request to the currently running master and observer
+panes, then exits. If objective is omitted, it is read from stdin.
+EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+task_id="${1:?task-id required}"
+shift || true
+if [ "$#" -gt 0 ]; then
+  objective="$*"
+else
+  objective="$(cat)"
+fi
+[ -n "$objective" ] || die "objective required via argv or stdin"
+
+master_pane="$(registry_get_role_pane master || true)"
+observer_pane="$(registry_get_role_pane observer || true)"
+[ -n "$master_pane" ] || die "no running master pane found in registry"
+[ -n "$observer_pane" ] || die "no running observer pane found in registry"
+
+master_msg=$(cat <<EOF
+[USER_REQUEST]
+from_pane: user-thread
+to_pane: ${master_pane}
+role: master
+message_type: request
+task_id: ${task_id}
+status: requested
+
+Objective:
+${objective}
+
+Required behavior:
+- Use the running observer/master orchestration; do not ask the user/main thread to poll.
+- /name this task and create a /tree planning checkpoint.
+- Decompose into bounded worker assignments when useful.
+- Use jj, not git.
+- Delegate review/verification to workers for substantial changes.
+- Ensure workers report only to master_pane=${master_pane} and observer_pane=${observer_pane}, not to the user/main thread.
+
+Stop condition:
+Complete the requested task or produce a structured blocked/failed report.
+
+Do not:
+- Do not make the user/main thread the polling loop.
+- Do not route worker reports to hard-coded pane IDs.
+[/USER_REQUEST]
+EOF
+)
+
+observer_msg=$(cat <<EOF
+[OBSERVER_REQUEST]
+from_pane: user-thread
+to_pane: ${observer_pane}
+role: observer
+message_type: request
+task_id: ${task_id}
+status: requested
+
+Objective:
+Monitor master_pane=${master_pane} and all workers for task ${task_id} via node-to-node messages only. Polling and sleep-based monitoring are absolutely forbidden.
+
+Please:
+- MUST NOT run .pi/scripts/observer-loop.
+- MUST NOT run polling loops, sleep loops, pane-dump loops, registry polling, or sleep-based monitoring fallbacks.
+- Watch worker lifecycle from WORKER_REPORT_POINTER and explicit node messages only.
+- Tell master_pane=${master_pane} about required actions.
+- Do not route routine lifecycle status to the user/main thread.
+
+Ledger focus:
+| task_id | assignment_id | worker_pane_id | status | purpose | blocker | cleanup_required |
+[/OBSERVER_REQUEST]
+EOF
+)
+
+"$SCRIPT_DIR/pane-send" "$master_pane" "$master_msg"
+"$SCRIPT_DIR/pane-send" "$observer_pane" "$observer_msg"
+
+cat <<EOF
+task_id: ${task_id}
+master_pane: ${master_pane}
+observer_pane: ${observer_pane}
+handoff: complete
+user_thread: idle
+EOF

@@ -32,6 +32,8 @@ During work:
 - Do not make irreversible changes unless explicitly allowed.
 - Do not commit unless explicitly allowed.
 - Do not modify unrelated files.
+- MUST NOT run polling loops, pane-dump loops, registry polling, sleep loops, or sleep-based monitoring for lifecycle/orchestration state.
+- MUST NOT wait for other nodes by polling or sleeping; stop at the assignment stop condition and report via WORKER_REPORT_POINTER.
 - Use `/tree` before switching from investigation to implementation.
 - Use `/tree` after two failed attempts.
 - Stop when the stop condition is met.
@@ -68,20 +70,25 @@ Exclude:
 
 After work:
 
-1. Send a structured report to the master.
-2. Send the same report or a concise copy to the observer.
-3. Stop.
-4. Wait for cleanup or explicit next instruction.
+1. Write the full structured report to a local file.
+2. Prefer `.pi/scripts/worker-report-submit <worker-pane> <task-id> <assignment-id> <status> <report-file>` to store the full report as a sidecar.
+3. Let `worker-report-submit` send the `WORKER_REPORT_POINTER` to the `master_pane` and `observer_pane` named in MASTER_DISPATCH Routing; do not paste the full report into chat.
+4. If sidecar submission is unavailable, send the full report to master/observer only.
+5. Do not send completion reports to the user/main thread.
+6. Do not use hard-coded pane IDs such as `0` or `1` unless the dispatch explicitly names them as the current master/observer panes.
+7. Stop.
+8. Wait for cleanup or explicit next instruction.
 
 Do not start another task on your own.
 
 ## Report Format
 
-Use this exact structure:
+Use this exact structure in the sidecar report file:
 
 [WORKER_REPORT]
 from_pane: <worker_pane_id>
-to_pane: 1
+to_pane: <master_pane from MASTER_DISPATCH Routing>
+cc_pane: <observer_pane from MASTER_DISPATCH Routing>
 role: worker
 message_type: report
 task_id: <task_id>
@@ -118,6 +125,20 @@ Context to discard:
 - ...
 [/WORKER_REPORT]
 
+Then send this small chat message:
+
+[WORKER_REPORT_POINTER]
+from_pane: <worker_pane_id>
+to_pane: <master_pane from MASTER_DISPATCH Routing>
+cc_pane: <observer_pane from MASTER_DISPATCH Routing>
+role: worker
+message_type: report_pointer
+task_id: <task_id>
+assignment_id: <assignment_id>
+status: done | blocked | failed | cancelled | needs_review
+report_path: <path printed by worker-report-submit>
+[/WORKER_REPORT_POINTER]
+
 ## Blocked Behavior
 
 If blocked, report immediately.
@@ -145,7 +166,8 @@ If the assignment seems too broad, respond with:
 
 [WORKER_REPORT]
 from_pane: <worker_pane_id>
-to_pane: 1
+to_pane: <master_pane from MASTER_DISPATCH Routing>
+cc_pane: <observer_pane from MASTER_DISPATCH Routing>
 role: worker
 message_type: report
 task_id: <task_id>

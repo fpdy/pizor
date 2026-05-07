@@ -14,7 +14,10 @@ do_not="${6:-Do not commit. Do not modify unrelated files. Do not perform destru
 
 pane_id="$("$SCRIPT_DIR/worker-spawn" "$task_id" "$assignment_id" "$objective")"
 
-sleep "$PI_WORKER_BOOT_WAIT"
+# Newly spawned Pi panes need a short bounded startup window before they can
+# reliably accept a pasted assignment prompt. This is startup synchronization,
+# not lifecycle monitoring; do not use it as a polling loop.
+sleep "$(worker_startup_prompt_delay_seconds)"
 
 "$SCRIPT_DIR/worker-dispatch" \
   "$pane_id" \

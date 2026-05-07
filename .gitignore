@@ -1,6 +1,10 @@
-# local orchestration state
-.orchestrator/
-.env
+.env*
+.pi
 
 # macOS
 .DS_Store
+
+# pizor
+.pizor/
+AGENTS.pizor.md
+

@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+usage() {
+  cat <<'EOF'
+usage: master-finalize <task-id> <status> <summary-file> [cleanup-state] [remaining-blockers]
+
+Sends the required final master-to-observer OBSERVER_STATUS handoff before the
+master reports final synthesis to the user. The summary file should contain the
+master's concise final synthesis, report-capture state, and cleanup state.
+EOF
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+[ "$#" -ge 3 ] || { usage >&2; exit 1; }
+task_id="$1"
+status="$2"
+summary_file="$3"
+cleanup_state="${4:-see summary file}"
+remaining_blockers="${5:-none}"
+
+case "$status" in
+  done|blocked|failed|cancelled|needs_review) ;;
+  *) die "invalid status: $status" ;;
+esac
+[ -f "$summary_file" ] || die "summary file not found: $summary_file"
+
+master_pane="$(registry_get_role_pane master || true)"
+observer_pane="$(registry_get_role_pane observer || true)"
+[ -n "$master_pane" ] || die "no running master pane found in registry"
+[ -n "$observer_pane" ] || die "no running observer pane found in registry"
+
+summary="$(cat "$summary_file")"
+summary_pointer="${summary_file#$ORCH_ROOT/}"
+
+msg=$(cat <<EOF
+[OBSERVER_STATUS]
+from_pane: ${master_pane}
+to_pane: ${observer_pane}
+role: master
+message_type: status
+task_id: ${task_id}
+status: ${status}
+
+Final synthesis:
+${summary}
+
+Report capture state:
+See summary_file: ${summary_pointer}
+
+Cleanup state:
+${cleanup_state}
+
+Remaining blockers:
+${remaining_blockers}
+
+Request:
+Observer owns all-work-complete decision. Confirm required reports are captured and cleanup is complete, or return concrete blockers to master_pane=${master_pane}.
+[/OBSERVER_STATUS]
+EOF
+)
+
+"$SCRIPT_DIR/pane-send" "$observer_pane" "$msg"
+printf '%s\n' "$msg"
