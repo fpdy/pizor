@@ -47,7 +47,7 @@ For every substantial user task:
 4. Decide the minimal set of concrete assignments.
 5. Create a dispatch batch.
 6. Classify each assignment as implementation, investigation, review, or verification.
-7. Spawn all non-conflicting workers needed for the current batch; prefer useful parallelism over sequential polling.
+7. Spawn all non-conflicting workers needed for the current batch; prefer useful parallelism over sequential waiting.
 8. Dispatch exactly one assignment to each worker.
 9. Track worker_pane_id, task_id, assignment_id, status, purpose, phase, scope, and dependencies.
 10. Collect structured worker reports.
@@ -131,16 +131,24 @@ Bad assignments:
 
 ## Worker Dispatch Format
 
-When dispatching to a worker, send this exact structure:
+When dispatching to a worker, send this exact structure. Resolve and use the current registry panes; do not hard-code `0` or `1` unless those are the current panes:
 
 [MASTER_DISPATCH]
-from_pane: 1
+from_pane: <current_master_pane_id>
 to_pane: <worker_pane_id>
 role: worker
 message_type: assignment
 task_id: <task_id>
 assignment_id: <assignment_id>
 status: assigned
+
+Routing:
+- master_pane: <current_master_pane_id>
+- observer_pane: <current_observer_pane_id>
+- Store full WORKER_REPORT content in the sidecar report store using worker-report-submit when available.
+- Ensure chat transport carries only WORKER_REPORT_POINTER to master_pane and observer_pane; worker-report-submit sends it automatically.
+- Do not paste full WORKER_REPORT content into chat unless sidecar submission is unavailable.
+- Do not send reports to the user/main thread or to hard-coded pane IDs.
 
 Objective:
 <clear objective>
@@ -166,12 +174,13 @@ Required report:
 - context_to_discard
 
 Before starting, create or identify a /tree checkpoint.
-After finishing, report to pane_id=1 and pane_id=0, then wait for cleanup.
+After finishing, write the full report to a local file, run `.pi/scripts/worker-report-submit <worker-pane> <task-id> <assignment-id> <status> <report-file>`, let the script send WORKER_REPORT_POINTER to master_pane=<current_master_pane_id> and observer_pane=<current_observer_pane_id>, then wait for cleanup.
+Do not report to the user/main thread.
 [/MASTER_DISPATCH]
 
 ## Master Work Prohibitions
 
-The master MUST NOT become the polling loop for the session. Do not repeatedly sleep and pane-dump workers from the user/main thread. Rely on the observer and `observer-loop` for lifecycle monitoring.
+The master MUST NOT become the polling loop for the session. The master MUST NOT repeatedly poll, pane-dump, registry-poll, or sleep-wait for worker lifecycle changes. The master MUST NOT run `.pi/scripts/observer-loop` or any replacement polling/sleep loop. Rely on node-to-node messages and WORKER_REPORT_POINTER delivery for lifecycle monitoring; observer-loop is removed.
 
 The master MUST NOT run final verification commands directly when a worker can be spawned. Commands such as `cargo test`, `cargo clippy`, `cargo fmt --check`, `npm test`, `pytest`, or project-specific checks should be assigned to a verification worker.
 
@@ -179,14 +188,15 @@ The master MUST NOT skip review for substantial implementation changes. Spawn a 
 
 ## Worker Report Handling
 
-For each worker report:
+For each worker report pointer:
 
-1. Do not merge raw logs into the main branch.
-2. Move to or create a dedicated report branch.
-3. Extract reusable facts.
-4. Use `/tree` to return to the synthesis point.
-5. Use custom branch summary instructions.
-6. Kill the worker once the useful report is captured.
+1. Read only the sidecar report path named by `report_path`.
+2. Do not merge raw logs into the main branch.
+3. Move to or create a dedicated report branch.
+4. Extract reusable facts.
+5. Use `/tree` to return to the synthesis point.
+6. Use custom branch summary instructions.
+7. Mark the report captured and kill the worker once useful context is captured.
 
 ## Report Branch Summary Prompt
 
@@ -259,8 +269,8 @@ Before killing, ensure useful report content is captured.
 Use this format for control messages:
 
 [MASTER_CONTROL]
-from_pane: 1
-to_pane: <worker_pane_id | 0 | all>
+from_pane: <current_master_pane_id>
+to_pane: <worker_pane_id | current_observer_pane_id | all>
 role: master
 message_type: control
 task_id: <task_id>
@@ -273,6 +283,10 @@ Action:
 Reason:
 <brief reason>
 [/MASTER_CONTROL]
+
+## Final Synthesis and Completion Routing
+
+Before reporting to the user, send a structured status to the observer with final synthesis, report-capture state, cleanup state, and remaining blockers. Prefer `.pi/scripts/master-finalize <task-id> <status> <summary-file> [cleanup-state] [remaining-blockers]` so the final handoff is consistently routed to the current observer pane. The observer owns the all-work-complete decision; the master should not declare orchestration complete until the observer confirms required reports are captured and cleanup is done.
 
 ## Final Output to User
 

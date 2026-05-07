@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+
+usage() {
+  cat <<'EOF'
+usage: worker-report-submit [--master-pane pane] [--observer-pane pane] <worker-pane> <task-id> <assignment-id> <status> <report-file>
+
+Resolves the target master/observer panes, stores the full WORKER_REPORT body
+in the orchestration sidecar report store, updates registry state, and sends a
+small WORKER_REPORT_POINTER block to those panes. Also prints the pointer for
+audit logs. If panes cannot be resolved, this fails before storing/updating so
+callers do not get a false-success report submission.
+EOF
+}
+
+explicit_master_pane=""
+explicit_observer_pane=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --master-pane) explicit_master_pane="${2:?--master-pane requires pane}"; shift 2 ;;
+    --observer-pane) explicit_observer_pane="${2:?--observer-pane requires pane}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) usage >&2; exit 1 ;;
+    *) break ;;
+  esac
+done
+
+[ "$#" -eq 5 ] || { usage >&2; exit 1; }
+worker_pane="$1"
+task_id="$2"
+assignment_id="$3"
+status="$4"
+source_file="$5"
+
+case "$status" in
+  done|blocked|failed|cancelled|needs_review) ;;
+  *) die "invalid status: $status" ;;
+esac
+[ -f "$source_file" ] || die "report file not found: $source_file"
+
+master_pane="${explicit_master_pane:-$(registry_get_role_pane master || true)}"
+observer_pane="${explicit_observer_pane:-$(registry_get_role_pane observer || true)}"
+[ -n "$master_pane" ] || die "master pane is required; pass --master-pane or ensure registry has an active master"
+[ -n "$observer_pane" ] || die "observer pane is required; pass --observer-pane or ensure registry has an active observer"
+
+report_path="$(report_path_for "$task_id" "$assignment_id" "$worker_pane")"
+mkdir -p "$(dirname "$report_path")"
+cp "$source_file" "$report_path"
+registry_update_worker_report "$worker_pane" "$status" "yes" "no"
+pointer="${report_path#$ORCH_ROOT/}"
+
+pointer_msg=$(cat <<EOF
+[WORKER_REPORT_POINTER]
+from_pane: ${worker_pane}
+to_pane: ${master_pane}
+cc_pane: ${observer_pane}
+role: worker
+message_type: report_pointer
+task_id: ${task_id}
+assignment_id: ${assignment_id}
+status: ${status}
+report_path: ${pointer}
+[/WORKER_REPORT_POINTER]
+EOF
+)
+
+if [ -n "${master_pane:-}" ]; then
+  "$SCRIPT_DIR/pane-send" "$master_pane" "$pointer_msg"
+fi
+if [ -n "${observer_pane:-}" ] && [ "${observer_pane:-}" != "${master_pane:-}" ]; then
+  "$SCRIPT_DIR/pane-send" "$observer_pane" "$pointer_msg"
+fi
+
+printf '%s\n' "$pointer_msg"

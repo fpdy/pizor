@@ -86,7 +86,12 @@ for i in $(seq 0 $((count - 1))); do
   spawned+=("$pane_id:$assignment_id")
 done
 
-sleep "$PI_WORKER_BOOT_WAIT"
+if [ "${#spawned[@]}" -gt 0 ]; then
+  # Newly spawned Pi panes need a short bounded startup window before they can
+  # reliably accept a pasted assignment prompt. This is startup synchronization,
+  # not lifecycle monitoring; do not use it as a polling loop.
+  sleep "$(worker_startup_prompt_delay_seconds)"
+fi
 
 for entry in "${spawned[@]}"; do
   pane_id="${entry%%:*}"

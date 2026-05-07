@@ -11,13 +11,21 @@ pane_id="${1:?usage: pane-send <pane-id> <message>}"
 message="${2:?usage: pane-send <pane-id> <message>}"
 
 # Prefer Zellij's built-in terminal input actions over the external
-# zellij-send-keys plugin. This avoids plugin compatibility/runtime issues and
-# works with both numeric pane IDs and terminal_<id> pane IDs.
+# zellij-send-keys plugin. Wrap multi-line content in bracketed paste so Pi
+# inserts it as one prompt instead of treating embedded newlines as keypresses.
+zellij --session "$PI_ORCH_SESSION" action write-chars \
+  --pane-id "$pane_id" \
+  $'\e[200~'
+
 zellij --session "$PI_ORCH_SESSION" action write-chars \
   --pane-id "$pane_id" \
   "$message"
 
-# Press Enter after writing the message.
-zellij --session "$PI_ORCH_SESSION" action write \
+zellij --session "$PI_ORCH_SESSION" action write-chars \
   --pane-id "$pane_id" \
-  13
+  $'\e[201~'
+
+# Press Enter after pasting the message.
+zellij --session "$PI_ORCH_SESSION" action write-chars \
+  --pane-id "$pane_id" \
+  $'\r'

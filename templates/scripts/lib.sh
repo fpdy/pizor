@@ -21,18 +21,15 @@ fi
 : "${PI_CMD:=pi}"
 : "${ZELLIJ_SEND_KEYS_PLUGIN:=$HOME/.config/zellij/plugins/zellij-send-keys.wasm}"
 : "${PI_WORKDIR:=$ORCH_ROOT}"
-: "${PI_ORCH_STATE_DIR:=.orchestrator}"
-: "${PI_WORKER_BOOT_WAIT:=1}"
+: "${PI_ORCH_STATE_DIR:=.pizor}"
 : "${PI_WORKER_NAME_PREFIX:=worker}"
-: "${PI_OBSERVER_POLL_INTERVAL:=5}"
-: "${PI_WORKER_IDLE_WARN_SECONDS:=120}"
-: "${PI_WORKER_LONG_RUNNING_SECONDS:=300}"
-: "${PI_OBSERVER_NOTICE_COOLDOWN_SECONDS:=60}"
 : "${PI_MAX_PARALLEL_WORKERS:=4}"
 : "${PI_MAX_PARALLEL_WRITERS:=1}"
+: "${PI_REPORT_DIR:=reports}"
 
 ORCH_STATE_DIR="$ORCH_ROOT/$PI_ORCH_STATE_DIR"
 REGISTRY_FILE="$ORCH_STATE_DIR/registry.tsv"
+REPORT_DIR="$ORCH_STATE_DIR/$PI_REPORT_DIR"
 
 mkdir -p "$ORCH_STATE_DIR"
 
@@ -47,6 +44,32 @@ require_cmd() {
 require_base_tools() {
   require_cmd zellij
   require_cmd jq
+}
+
+bounded_sleep_seconds() {
+  local raw="${1:-}"
+  local default_value="${2:-2}"
+  local max_value="${3:-10}"
+
+  if ! [[ "$default_value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    default_value=2
+  fi
+  if ! [[ "$max_value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    max_value=10
+  fi
+  if ! [[ "$raw" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    printf '%s\n' "$default_value"
+    return
+  fi
+
+  awk -v value="$raw" -v max="$max_value" 'BEGIN {
+    if (value > max) value = max
+    printf "%g\n", value
+  }'
+}
+
+worker_startup_prompt_delay_seconds() {
+  bounded_sleep_seconds "${PI_WORKER_STARTUP_PROMPT_DELAY_SECONDS:-}" 2 "${PI_WORKER_STARTUP_PROMPT_DELAY_MAX_SECONDS:-10}"
 }
 
 json_string() {
@@ -169,7 +192,38 @@ registry_get_role_pane() {
 
   init_registry
 
-  awk -F '\t' -v role="$role" 'NR > 1 && $1 == role { print $2; exit }' "$REGISTRY_FILE"
+  # Prefer the newest non-closed pane for this role. The registry is append-like
+  # across orchestration sessions, so returning the first historical role entry
+  # can route messages to stale panes or the user/main thread.
+  awk -F '\t' -v role="$role" '
+    NR > 1 && $1 == role && $5 != "closed" && $5 != "closing" { pane = $2 }
+    END { if (pane != "") print pane }
+  ' "$REGISTRY_FILE"
+}
+
+report_path_for() {
+  local task_id="$1"
+  local assignment_id="$2"
+  local pane_id="$3"
+  printf '%s/%s/%s.%s.md\n' "$REPORT_DIR" "$task_id" "$assignment_id" "$pane_id"
+}
+
+report_pointer_for() {
+  local task_id="$1"
+  local assignment_id="$2"
+  local pane_id="$3"
+  local report_path
+  report_path="$(report_path_for "$task_id" "$assignment_id" "$pane_id")"
+  printf '%s\n' "${report_path#$ORCH_ROOT/}"
+}
+
+find_report_pointer() {
+  local task_id="$1"
+  local assignment_id="$2"
+  local pane_id="$3"
+  local report_path
+  report_path="$(report_path_for "$task_id" "$assignment_id" "$pane_id")"
+  [ -f "$report_path" ] && printf '%s\n' "${report_path#$ORCH_ROOT/}"
 }
 
 die() {

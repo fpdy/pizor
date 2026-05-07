@@ -13,17 +13,30 @@ scope="${5:-Stay within this assignment. Do not broaden scope.}"
 stop_condition="${6:-Stop when you can produce the required report, or when you become blocked.}"
 do_not="${7:-Do not commit. Do not modify unrelated files. Do not perform destructive actions.}"
 
+master_pane="$(registry_get_role_pane master || true)"
+observer_pane="$(registry_get_role_pane observer || true)"
+[ -n "$master_pane" ] || die "no running master pane found in registry; start or register node-master before dispatch"
+[ -n "$observer_pane" ] || die "no running observer pane found in registry; start or register node-observer before dispatch"
+
 msg=$(cat <<EOF
 /skill:node-worker
 
 [MASTER_DISPATCH]
-from_pane: 1
+from_pane: ${master_pane}
 to_pane: ${worker_pane}
 role: worker
 message_type: assignment
 task_id: ${task_id}
 assignment_id: ${assignment_id}
 status: assigned
+
+Routing:
+- master_pane: ${master_pane}
+- observer_pane: ${observer_pane}
+- Store the full report in the sidecar report store using .pi/scripts/worker-report-submit when available.
+- Ensure chat transport carries only WORKER_REPORT_POINTER to master_pane and observer_pane; worker-report-submit sends it automatically.
+- Do not paste full WORKER_REPORT content into chat unless sidecar submission is unavailable.
+- Do not send reports to the user/main thread or to hard-coded pane IDs.
 
 Objective:
 ${objective}
@@ -49,7 +62,10 @@ Required report:
 - context_to_discard
 
 Before starting, create or identify a /tree checkpoint.
-After finishing, report to pane_id=1 and pane_id=0, then wait for cleanup.
+After finishing, write the full report to a local file and run:
+.pi/scripts/worker-report-submit --master-pane ${master_pane} --observer-pane ${observer_pane} ${worker_pane} ${task_id} ${assignment_id} <status> <report-file>
+The script sends WORKER_REPORT_POINTER to master_pane=${master_pane} and observer_pane=${observer_pane}; then wait for cleanup.
+Do not report to the user/main thread.
 [/MASTER_DISPATCH]
 EOF
 )

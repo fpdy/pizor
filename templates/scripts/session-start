@@ -7,16 +7,15 @@ source "$SCRIPT_DIR/lib.sh"
 
 require_base_tools
 
-auto_observe="false"
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --auto-observe) auto_observe="true"; shift ;;
+    --auto-observe) die "--auto-observe was removed; polling-based observer-loop is forbidden" ;;
     -h|--help)
       cat <<'EOF'
-usage: session-start [--auto-observe]
+usage: session-start
 
---auto-observe starts the observer-loop from the observer Pi pane so the user
-thread does not have to poll pane-dump/registry-list manually.
+Starts observer/master Pi panes in a dedicated Zellij tab. Pizor does not start
+polling loops; lifecycle updates are delivered by node-to-node messages.
 EOF
       exit 0
       ;;
@@ -28,37 +27,64 @@ if [ -z "${ZELLIJ:-}" ] && [ -z "${ZELLIJ_SESSION_NAME:-}" ]; then
   die "session-start must be run from inside Zellij"
 fi
 
-observer_pane="$(
-  zellij --session "$PI_ORCH_SESSION" action new-pane \
+tab_name="pizor-$(date +%H%M%S)"
+
+# Start the observer as the tab's initial pane. Creating an empty tab first
+# leaves a stray shell pane; using the initial command keeps the tab to exactly
+# the observer/master panes.
+tab_id="$(
+  zellij --session "$PI_ORCH_SESSION" action new-tab \
+    --name "$tab_name" \
     --cwd "$PI_WORKDIR" \
-    --name "observer" \
     -- "$PI_CMD"
 )"
 
+# Zellij returns the tab ID for new-tab, not the initial pane ID. Resolve the
+# non-plugin pane in the new tab, then name it explicitly for routing/debugging.
+observer_pane=""
+for _ in 1 2 3 4 5; do
+  observer_pane="$(
+    zellij --session "$PI_ORCH_SESSION" action list-panes --json --all --tab --command \
+      | jq -r --argjson tab_id "$tab_id" '
+        map(select(.tab_id == $tab_id and (.is_plugin | not) and (.exited | not)))
+        | sort_by(.id)
+        | last
+        | if . == null then "" else "terminal_\(.id)" end
+      '
+  )"
+  [ -n "$observer_pane" ] && break
+  sleep 0.2
+done
+[ -n "$observer_pane" ] || die "failed to locate observer pane in tab $tab_id"
+zellij --session "$PI_ORCH_SESSION" action rename-pane --pane-id "$observer_pane" "node-observer" >/dev/null 2>&1 || true
+
 master_pane="$(
   zellij --session "$PI_ORCH_SESSION" action new-pane \
+    --tab-id "$tab_id" \
     --cwd "$PI_WORKDIR" \
-    --name "master" \
+    --name "node-master" \
     -- "$PI_CMD"
 )"
 
 registry_add "observer" "$observer_pane" "" "" "starting" "observer node"
 registry_add "master" "$master_pane" "" "" "starting" "master node"
 
-sleep "$PI_WORKER_BOOT_WAIT"
+# Give Pi TUIs time to initialize before injecting startup prompts.
+sleep "${PI_STARTUP_PROMPT_DELAY_SECONDS:-2}"
 
 "$SCRIPT_DIR/pane-send" "$observer_pane" "/skill:node-observer
 
-/name pi-orchestrator-observer
+/name pizor-observer
 
 You are the observer node for this Zellij Pi orchestration session.
-Track dynamic worker lifecycle.
+Track dynamic worker lifecycle from node-to-node messages.
 Do not assume fixed workers.
-If auto-observe is requested, run .pi/scripts/observer-loop and relay its findings to the master."
+MUST NOT run polling loops, sleep loops, pane-dump loops, registry polling, or .pi/scripts/observer-loop.
+MUST NOT use sleep-based monitoring as a fallback."
 
 "$SCRIPT_DIR/pane-send" "$master_pane" "/skill:node-master
 
-/name pi-orchestrator-master
+/name pizor-master
 
 You are the master node for this Zellij Pi orchestration session.
 Use dynamic workers only.
@@ -68,19 +94,16 @@ Use /tree for planning, worker reports, synthesis, and final decisions."
 registry_update_status "$observer_pane" "running"
 registry_update_status "$master_pane" "running"
 
-if [ "$auto_observe" = "true" ]; then
-  "$SCRIPT_DIR/pane-send" "$observer_pane" "! .pi/scripts/observer-loop --interval $PI_OBSERVER_POLL_INTERVAL"
-fi
-
 cat <<EOF
 session: $PI_ORCH_SESSION
+tab: $tab_name
 observer_pane: $observer_pane
 master_pane: $master_pane
-auto_observe: $auto_observe
+polling: disabled
 
 Attach:
   zellij attach $PI_ORCH_SESSION
 
 Registry:
-  scripts/registry-list
+  .pi/scripts/registry-list
 EOF
